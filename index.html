@@ -1,3 +1,75 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coast-Down Pro</title>
+<style>
+body { font-family: sans-serif; background: #121212; color: #fff; padding: 10px; text-align: center; margin: 0; }
+.card { background: #1e1e1e; padding: 12px; border-radius: 10px; margin: 8px auto; max-width: 95%; box-sizing: border-box; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+.grid-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; padding: 5px; }
+input { width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 5px; text-align: center; box-sizing: border-box; }
+button { background: #00e676; color: #000; border: none; padding: 12px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 8px; width: 100%; font-size: 15px; box-sizing: border-box; }
+.btn-gps-status { background: #f44336; color: #fff; font-size: 13px; padding: 8px; transition: background 0.3s ease; }
+.btn-gps-status.gps-ready { background: #4caf50; color: #fff; }
+.btn-orange { background: #ff9100; color: #fff; font-size: 13px; padding: 8px; margin-top: 5px; }
+.btn-map { background: #ab47bc; color: #fff; font-size: 12px; padding: 8px; margin: 4px 0; }
+.btn-map.active { background: #e91e63; }
+.highlight { font-size: 22px; color: #00e676; font-weight: bold; }
+.status-box { padding: 8px; border-radius: 5px; margin: 5px 0; font-weight: bold; font-size: 12px; box-sizing: border-box; }
+.active-zone { background: #d32f2f; color: #fff; animation: blink 1s infinite; }
+.inactive-zone { background: #333; color: #aaa; }
+.run-badge { display: inline-block; padding: 3px 6px; background: #555; border-radius: 3px; margin: 2px; font-size: 11px; }
+.run-active { background: #00e676; color: #000; font-weight: bold; }
+#debugRuns { font-size: 11px; color: #aaa; text-align: left; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap; overflow-x: auto; }
+@keyframes blink { 50% { opacity: 0.6; } }
+</style>
+</head>
+<body>
+<h1>Coast-Down Kalman</h1>
+<div class="card">
+<h3>1. Configurazione</h3>
+<button id="weatherBtn" class="btn-gps-status" onclick="fetchLiveWeather()">🔴 Ricerca Satelliti / Dai i Permessi...</button>
+<div class="grid-inputs">
+<div><label>Massa (kg):</label><input type="number" id="mass" value="1500"></div>
+<div><label>Area A (m²):</label><input type="number" id="area" value="2.2" step="0.05"></div>
+</div>
+<div style="font-size:11px; color:#aaa; text-align:left;">
+Densità Aria (&rho;): <span id="rhoDisplay" style="color:#00e676;">1.2250</span> kg/m³
+</div>
+</div>
+<div class="card">
+<h3>2. Sessione</h3>
+<div>
+<span id="badge-A" class="run-badge run-active">Mappa (A)</span>
+<span id="badge-B" class="run-badge">Auto (B)</span>
+<span id="badge-A2" class="run-badge">Auto (A2)</span>
+</div>
+<div id="mappingControls">
+<button id="mapCxBtn" class="btn-map" onclick="toggleMapZone('Cx')">Log Cx (Alta)</button>
+<button id="mapCrrBtn" class="btn-map" onclick="toggleMapZone('Crr')">Log Crr (Bassa)</button>
+</div>
+<button id="actionBtn" onclick="advanceStep()">Avvia Mappatura</button>
+<button class="btn-orange" onclick="resetSession()">Reset Intero</button>
+</div>
+<div class="card">
+<h3>3. Monitor (Filtrato)</h3>
+<p>Velocità: <span id="speedDisplay" class="highlight">0.0</span> km/h</p>
+<p>Accelerazione: <span id="accelDisplay" style="color:#ff1744; font-weight:bold;">0.00</span> m/s²</p>
+<p style="font-size:12px;">Stato: <span id="logStatus" style="font-weight:bold; color:#aaa;">Inattivo</span></p>
+<div id="zoneCxDisplay" class="status-box inactive-zone">ZONA Cx (Punti: <span id="cxPoints">0</span>)</div>
+<div id="zoneCrrDisplay" class="status-box inactive-zone">ZONA Crr (Punti: <span id="crrPoints">0</span>)</div>
+</div>
+<div class="card">
+<h3>4. Risultati</h3>
+<p>Crr Medio: <span id="crrResult" class="highlight">-</span></p>
+<p>Cx Medio: <span id="cxResult" class="highlight">-</span></p>
+<div id="debugRuns"></div>
+</div>
+  
+
+
+
 <script>
 let watchId = null, currentStage = "IDLE"; 
 let isMappingCx = false, isMappingCrr = false;
@@ -86,7 +158,7 @@ document.getElementById(id).classList.add("run-active");
 function startGps() {
 if (navigator.geolocation) {
 watchId = navigator.geolocation.watchPosition(onGpsUpdate, onGpsError, {
-enableHighAccuracy: true, maximumAge: 0, timeout: 5000
+enableHighAccuracy: true, maximumAge: 0, timeout: 7000
 });
 }
 }
@@ -97,7 +169,7 @@ function onGpsError(err) {
 hasGpsFix = false;
 const wBtn = document.getElementById("weatherBtn");
 wBtn.className = "btn-gps-status";
-wBtn.textContent = "🔴 GPS Assente. Esci all'aperto o dai i permessi!";
+wBtn.textContent = "🔴 GPS Assente. Esci all'aperto o controlla i permessi!";
 }
 
 function onGpsUpdate(position) {
@@ -115,8 +187,7 @@ wBtn.textContent = "🟢 GPS Agganciato! Clicca per Meteo Live";
 }
 
 if (rawSpeed !== null && rawSpeed >= 0) {
-const displaySpeed = (isKalmanInitialized) ? filterGpsData(rawSpeed, (time - (lastTime || time))) : rawSpeed;
-document.getElementById("speedDisplay").textContent = (displaySpeed * 3.6).toFixed(1);
+document.getElementById("speedDisplay").textContent = (rawSpeed * 3.6).toFixed(1);
 }
 
 if (rawSpeed === null || rawSpeed < 0) return;
@@ -186,7 +257,7 @@ let sumF = 0; crrD.forEach(p => { sumF += -m*p.a; });
 crrVal = (sumF / crrD.length) / (m * g);
 if(crrVal < 0.003) crrVal = 0.0085; results.crr.push(crrVal);
 }
-debug += `Lancio ${r} -> Cx: ${cxVal.toFixed(2)} | Crr: ${crrVal.toFixed(4)}\n`;
+debug += `Lancio ${r} -> Cx: ${cxVal.toFixed(2)} | Attrito: ${crrVal.toFixed(4)}\n`;
 });
 const fCx = results.cx.reduce((a,b)=>a+b,0)/results.cx.length;
 const fCrr = results.crr.reduce((a,b)=>a+b,0)/results.crr.length;
