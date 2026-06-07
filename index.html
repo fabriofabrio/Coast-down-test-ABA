@@ -10,7 +10,8 @@ body { font-family: sans-serif; background: #121212; color: #fff; padding: 10px;
 .grid-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; padding: 5px; }
 input { width: 100%; padding: 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 5px; text-align: center; box-sizing: border-box; }
 button { background: #00e676; color: #000; border: none; padding: 12px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 8px; width: 100%; font-size: 15px; box-sizing: border-box; }
-.btn-blue { background: #29b6f6; color: #fff; font-size: 13px; padding: 8px; }
+.btn-gps-status { background: #f44336; color: #fff; font-size: 13px; padding: 8px; transition: background 0.3s ease; }
+.btn-gps-status.gps-ready { background: #4caf50; color: #fff; }
 .btn-orange { background: #ff9100; color: #fff; font-size: 13px; padding: 8px; margin-top: 5px; }
 .btn-map { background: #ab47bc; color: #fff; font-size: 12px; padding: 8px; margin: 4px 0; }
 .btn-map.active { background: #e91e63; }
@@ -28,7 +29,7 @@ button { background: #00e676; color: #000; border: none; padding: 12px; font-wei
 <h1>Coast-Down Kalman</h1>
 <div class="card">
 <h3>1. Configurazione</h3>
-<button class="btn-blue" onclick="fetchLiveWeather()">🌍 Meteo Live</button>
+<button id="weatherBtn" class="btn-gps-status" onclick="fetchLiveWeather()">🔴 GPS Disconnesso (Meteo Bloccato)</button>
 <div class="grid-inputs">
 <div><label>Massa (kg):</label><input type="number" id="mass" value="1500"></div>
 <div><label>Area A (m²):</label><input type="number" id="area" value="2.2" step="0.05"></div>
@@ -74,6 +75,12 @@ let isKalmanInitialized = false, smoothedAccel = null; const alphaAccel = 0.4;
 let geoZones = { cx: { points: [] }, crr: { points: [] }, radiusMeters: 60 };
 let sessionData = { A: { cxPoints: [], crrPoints: [] }, B: { cxPoints: [], crrPoints: [] }, A2: { cxPoints: [], crrPoints: [] } };
 let lastTime = null;
+
+// Coordinate d'appoggio per il meteo aggiornate in automatico in background dal flusso GPS
+let currentLatestLat = null;
+let currentLatestLon = null;
+let hasGpsFix = false;
+
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
 const R = 6371000;
 const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -81,6 +88,7 @@ const dLon = (lon2 - lon1) * Math.PI / 180;
 const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
 return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
+
 function isInsideZone(lat, lon, zonePoints) {
 if (zonePoints.length === 0) return false;
 for (let p of zonePoints) {
@@ -88,6 +96,7 @@ if (getDistanceMeters(lat, lon, p.lat, p.lon) <= geoZones.radiusMeters) return t
 }
 return false;
 }
+
 function filterGpsData(rawSpeed, dt) {
 if (!isKalmanInitialized) { kalmanX = rawSpeed; isKalmanInitialized = true; return rawSpeed; }
 kalmanP = kalmanP + kalmanQ;
@@ -96,6 +105,7 @@ kalmanX = kalmanX + kalmanK * (rawSpeed - kalmanX);
 kalmanP = (1 - kalmanK) * kalmanP;
 return kalmanX;
 }
+
 function advanceStep() {
 const btn = document.getElementById("actionBtn");
 if (currentStage === "IDLE") {
@@ -118,6 +128,7 @@ btn.textContent = "Completato"; btn.disabled = true;
 calculateFinalValues();
 }
 }
+
 function toggleMapZone(zone) {
 if (currentStage !== "MAPPING_A") return;
 const btn = document.getElementById(`map${zone}Btn`);
@@ -131,22 +142,46 @@ document.getElementById("mapCxBtn").classList.remove("active");
 btn.classList.toggle("active", isMappingCrr);
 }
 }
+
 function updateBadges(run) {
 document.querySelectorAll(".run-badge").forEach(b => b.classList.remove("run-active"));
 const id = run === "B" ? "badge-B" : (run === "A2" ? "badge-A2" : "badge-A");
 document.getElementById(id).classList.add("run-active");
 }
+
 function startGps() {
 if (navigator.geolocation) {
-watchId = navigator.geolocation.watchPosition(onGpsUpdate, null, {
+watchId = navigator.geolocation.watchPosition(onGpsUpdate, onGpsError, {
 enableHighAccuracy: true, maximumAge: 0, timeout: 5000
 });
 }
 }
+
 function stopGps() { if (watchId) navigator.geolocation.clearWatch(watchId); }
+
+function onGpsError(err) {
+hasGpsFix = false;
+const wBtn = document.getElementById("weatherBtn");
+wBtn.className = "btn-gps-status";
+wBtn.textContent = "🔴 GPS Perso / Ricerca Segnale...";
+}
+
 function onGpsUpdate(position) {
 const lat = position.coords.latitude; const lon = position.coords.longitude;
 const rawSpeed = position.coords.speed; const time = position.timestamp / 1000;
+
+// Memorizza le ultime coordinate valide ricevute dall'antenna per il servizio meteo
+currentLatestLat = lat;
+currentLatestLon = lon;
+
+// GESTIONE CAMBIO COLORE PULSANTE IN TEMPO REALE
+if (!hasGpsFix) {
+hasGpsFix = true;
+const wBtn = document.getElementById("weatherBtn");
+wBtn.className = "btn-gps-status gps-ready";
+wBtn.textContent = "🟢 GPS Agganciato! Clicca per Meteo Live";
+}
+
 if (rawSpeed === null || rawSpeed < 0) return;
 if (lastTime !== null) {
 const dt = time - lastTime;
@@ -189,9 +224,11 @@ document.getElementById("crrPoints").textContent = sessionData[rKey].crrPoints.l
 }
 lastTime = time;
 }
+
 function setZoneState(zone, isActive) {
 document.getElementById(`zone${zone}Display`).className = isActive ? "status-box active-zone" : "status-box inactive-zone";
 }
+
 function calculateFinalValues() {
 const m = parseFloat(document.getElementById("mass").value);
 const A = parseFloat(document.getElementById("area").value);
@@ -219,54 +256,27 @@ document.getElementById("cxResult").textContent = fCx.toFixed(2);
 document.getElementById("crrResult").textContent = fCrr.toFixed(4);
 document.getElementById("debugRuns").innerText = debug;
 }
+
 function resetSession() { location.reload(); }
 
-function fetchLiveWeather() {
-    if (!navigator.geolocation) {
-        alert("Geolocalizzazione non supportata.");
-        return;
-    }
-
-    // Forza la richiesta della posizione singola prima di interrogare l'API
-    navigator.geolocation.getCurrentPosition(async (p) => {
-        try {
-            const lat = p.coords.latitude;
-            const lon = p.coords.longitude;
-            
-            // Chiamata all'API meteo usando le coordinate reali appena ottenute
-            const res = await fetch(`https://open-meteo.com{lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,surface_pressure`);
-            const d = await res.json();
-            
-            if (d && d.current) {
-                const Tk = d.current.temperature_2m + 273.15; 
-                const Ppa = d.current.surface_pressure * 100;
-                const Psat = 610.78 * Math.exp((17.27 * d.current.temperature_2m) / (d.current.temperature_2m + 237.3));
-                const Pv = Psat * (d.current.relative_humidity_2m / 100);
-                
-                // Ricalcolo della densità dinamica
-                calculatedRho = ((Ppa - Pv) / (287.058 * Tk)) + (Pv / (461.495 * Tk));
-                
-                // Aggiornamento grafico del testo in verde
-                document.getElementById("rhoDisplay").textContent = calculatedRho.toFixed(4);
-                alert("Meteo Sincronizzato con successo!");
-            } else {
-                alert("Dati meteo non validi dal server.");
-            }
-        } catch (e) { 
-            alert("Errore di connessione al server meteo: " + e.message); 
-        }
-    }, (error) => {
-        // Gestione degli errori del chip GPS interno
-        if (error.code === 1) {
-            alert("Errore: Devi dare il permesso al browser per usare il GPS.");
-        } else if (error.code === 2) {
-            alert("Errore: GPS non disponibile. Attiva la geolocalizzazione sul telefono.");
-        } else {
-            alert("Errore timeout GPS. Riprova tra qualche istante.");
-        }
-    }, { enableHighAccuracy: true, timeout: 10000 });
+async function fetchLiveWeather() {
+if (!hasGpsFix || currentLatestLat === null) {
+alert("Impossibile scaricare il meteo: attendi che il pulsante diventi VERDE per confermare l'aggancio satellitare!");
+return;
 }
-
+try {
+const url = "https://open-meteo.com" + currentLatestLat + "&longitude=" + currentLatestLon + "&current=temperature_2m,relative_humidity_2m,surface_pressure";
+const res = await fetch(url);
+const d = await res.json();
+if (d && d.current) {
+const Tk = d.current.temperature_2m + 273.15; const Ppa = d.current.surface_pressure * 100;
+const Psat = 610.78 * Math.exp((17.27 * d.current.temperature_2m) / (d.current.temperature_2m + 237.3));
+const Pv = Psat * (d.current.relative_humidity_2m / 100);
+calculatedRho = ((Ppa - Pv) / (287.058 * Tk)) + (Pv / (461.495 * Tk));
+document.getElementById("rhoDisplay").textContent = calculatedRho.toFixed(4);
+alert("Meteo Sincronizzato con successo! Densità aria aggiornata.");
+}
+} catch (e) { alert("Errore di rete nell'aggiornamento meteo."); }
 }
 </script>
 </body>
