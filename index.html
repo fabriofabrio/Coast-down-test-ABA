@@ -271,7 +271,7 @@ alert("Attendi l'aggancio satellitare prima di scaricare il meteo!");
 return;
 }
 try {
-const url = `https://open-meteo.com{currentLatestLat}&longitude=${currentLatestLon}&current=temperature_2m,relative_humidity_2m,surface_pressure`;
+const url =  https://api.open-meteo.comcurrentLatestLat}&longitude=${currentLatestLon}&current=temperature_2m,relative_humidity_2m,surface_pressure`;
 const res = await fetch(url);
 const d = await res.json();
 if (d && d.current) {
