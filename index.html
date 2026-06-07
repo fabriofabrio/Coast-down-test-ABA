@@ -29,7 +29,7 @@ button { background: #00e676; color: #000; border: none; padding: 12px; font-wei
 <h1>Coast-Down Kalman</h1>
 <div class="card">
 <h3>1. Configurazione</h3>
-<button id="weatherBtn" class="btn-gps-status" onclick="fetchLiveWeather()">🔴 GPS Disconnesso (Meteo Bloccato)</button>
+<button id="weatherBtn" class="btn-gps-status" onclick="fetchLiveWeather()">🔴 Ricerca Satelliti / Dai i Permessi...</button>
 <div class="grid-inputs">
 <div><label>Massa (kg):</label><input type="number" id="mass" value="1500"></div>
 <div><label>Area A (m²):</label><input type="number" id="area" value="2.2" step="0.05"></div>
@@ -76,10 +76,13 @@ let geoZones = { cx: { points: [] }, crr: { points: [] }, radiusMeters: 60 };
 let sessionData = { A: { cxPoints: [], crrPoints: [] }, B: { cxPoints: [], crrPoints: [] }, A2: { cxPoints: [], crrPoints: [] } };
 let lastTime = null;
 
-// Coordinate d'appoggio per il meteo aggiornate in automatico in background dal flusso GPS
 let currentLatestLat = null;
 let currentLatestLon = null;
 let hasGpsFix = false;
+
+window.onload = function() {
+startGps();
+};
 
 function getDistanceMeters(lat1, lon1, lat2, lon2) {
 const R = 6371000;
@@ -112,7 +115,6 @@ if (currentStage === "IDLE") {
 currentStage = "MAPPING_A";
 btn.textContent = "Mappa A ➡️ Passa a Run B";
 btn.style.backgroundColor = "#ff9100";
-startGps();
 } else if (currentStage === "MAPPING_A") {
 isMappingCx = false; isMappingCrr = false;
 document.getElementById("mappingControls").style.display = "none";
@@ -163,23 +165,26 @@ function onGpsError(err) {
 hasGpsFix = false;
 const wBtn = document.getElementById("weatherBtn");
 wBtn.className = "btn-gps-status";
-wBtn.textContent = "🔴 GPS Perso / Ricerca Segnale...";
+wBtn.textContent = "🔴 GPS Assente. Esci all'aperto o dai i permessi!";
 }
 
 function onGpsUpdate(position) {
 const lat = position.coords.latitude; const lon = position.coords.longitude;
 const rawSpeed = position.coords.speed; const time = position.timestamp / 1000;
 
-// Memorizza le ultime coordinate valide ricevute dall'antenna per il servizio meteo
 currentLatestLat = lat;
 currentLatestLon = lon;
 
-// GESTIONE CAMBIO COLORE PULSANTE IN TEMPO REALE
 if (!hasGpsFix) {
 hasGpsFix = true;
 const wBtn = document.getElementById("weatherBtn");
 wBtn.className = "btn-gps-status gps-ready";
 wBtn.textContent = "🟢 GPS Agganciato! Clicca per Meteo Live";
+}
+
+if (rawSpeed !== null && rawSpeed >= 0) {
+const displaySpeed = (isKalmanInitialized) ? filterGpsData(rawSpeed, (time - (lastTime || time))) : rawSpeed;
+document.getElementById("speedDisplay").textContent = (displaySpeed * 3.6).toFixed(1);
 }
 
 if (rawSpeed === null || rawSpeed < 0) return;
@@ -189,9 +194,9 @@ if (dt > 0) {
 const filteredSpeed = filterGpsData(rawSpeed, dt);
 const rawAccel = (filteredSpeed - kalmanX) / dt; 
 smoothedAccel = (smoothedAccel === null) ? rawAccel : (alphaAccel * rawAccel) + ((1 - alphaAccel) * smoothedAccel);
-document.getElementById("speedDisplay").textContent = (filteredSpeed * 3.6).toFixed(1);
 document.getElementById("accelDisplay").textContent = smoothedAccel.toFixed(2);
 let statusLabel = "Inattivo";
+
 if (currentStage === "MAPPING_A") {
 if (isMappingCx) {
 geoZones.cx.points.push({lat, lon}); sessionData.A.cxPoints.push({v: filteredSpeed, a: smoothedAccel});
@@ -214,6 +219,7 @@ sessionData[runKey].crrPoints.push({v: filteredSpeed, a: smoothedAccel});
 setZoneState("Cx", false); setZoneState("Crr", true); statusLabel = "AUTO-LOG: Crr!";
 } else { setZoneState("Cx", false); setZoneState("Crr", false); }
 }
+
 document.getElementById("logStatus").textContent = statusLabel;
 const rKey = currentStage === "MAPPING_A" ? "A" : (currentStage === "RUN_B" ? "B" : (currentStage === "RUN_A2" ? "A2" : null));
 if (rKey) {
@@ -261,11 +267,11 @@ function resetSession() { location.reload(); }
 
 async function fetchLiveWeather() {
 if (!hasGpsFix || currentLatestLat === null) {
-alert("Impossibile scaricare il meteo: attendi che il pulsante diventi VERDE per confermare l'aggancio satellitare!");
+alert("Attendi l'aggancio satellitare prima di scaricare il meteo!");
 return;
 }
 try {
-const url = "https://open-meteo.com" + currentLatestLat + "&longitude=" + currentLatestLon + "&current=temperature_2m,relative_humidity_2m,surface_pressure";
+const url = `https://open-meteo.com{currentLatestLat}&longitude=${currentLatestLon}&current=temperature_2m,relative_humidity_2m,surface_pressure`;
 const res = await fetch(url);
 const d = await res.json();
 if (d && d.current) {
@@ -274,9 +280,13 @@ const Psat = 610.78 * Math.exp((17.27 * d.current.temperature_2m) / (d.current.t
 const Pv = Psat * (d.current.relative_humidity_2m / 100);
 calculatedRho = ((Ppa - Pv) / (287.058 * Tk)) + (Pv / (461.495 * Tk));
 document.getElementById("rhoDisplay").textContent = calculatedRho.toFixed(4);
-alert("Meteo Sincronizzato con successo! Densità aria aggiornata.");
+alert("Meteo Sincronizzato! Densità aria aggiornata.");
+} else {
+alert("Errore: Risposta server vuota.");
 }
-} catch (e) { alert("Errore di rete nell'aggiornamento meteo."); }
+} catch (e) { 
+alert("Errore di connessione: " + e.message); 
+}
 }
 </script>
 </body>
