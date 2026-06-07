@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -66,7 +67,11 @@ Densità Aria (&rho;): <span id="rhoDisplay" style="color:#00e676;">1.2250</span
 <p>Cx Medio: <span id="cxResult" class="highlight">-</span></p>
 <div id="debugRuns"></div>
 </div>
-  
+
+
+
+
+
 
 
 
@@ -169,7 +174,7 @@ function onGpsError(err) {
 hasGpsFix = false;
 const wBtn = document.getElementById("weatherBtn");
 wBtn.className = "btn-gps-status";
-wBtn.textContent = "🔴 GPS Assente. Esci all'aperto o controlla i permessi!";
+wBtn.textContent = "🔴 GPS Assente. Controlla i permessi!";
 }
 
 function onGpsUpdate(position) {
@@ -268,41 +273,48 @@ document.getElementById("debugRuns").innerText = debug;
 
 function resetSession() { location.reload(); }
 
-function calculateManualDensity(tempCelsius) {
-const T_k = tempCelsius + 273.15;
-const P_pa = 101325; 
-calculatedRho = P_pa / (287.058 * T_k);
+function calculateAccurateManualDensity(tC, pHpa, rh) {
+const Rd = 287.058; const Rv = 461.495;
+const T_k = tC + 273.15; const P_pa = pHpa * 100;
+const Rh_f = rh / 100;
+const P_sat = 610.78 * Math.exp((17.27 * tC) / (tC + 237.3));
+const Pv = P_sat * Rh_f; const Pd = P_pa - Pv;
+calculatedRho = (Pd / (Rd * T_k)) + (Pv / (Rv * T_k));
 document.getElementById("rhoDisplay").textContent = calculatedRho.toFixed(4);
-alert("Calcolo Eseguito! Densità impostata a " + calculatedRho.toFixed(4) + " kg/m³ per " + tempCelsius + "°C");
+const alpha = ((17.27 * tC) / (237.3 + tC)) + Math.log(Rh_f > 0 ? Rh_f : 0.001);
+const T_dp = (237.3 * alpha) / (17.27 - alpha);
+alert("Rho Aria: " + calculatedRho.toFixed(4) + " kg/m³\nRugiada: " + T_dp.toFixed(1) + " °C");
 }
 
 async function fetchLiveWeather() {
 if (!hasGpsFix || currentLatestLat === null) {
-alert("Attendi l'aggancio satellitare prima di scaricare il meteo!");
-return;
+alert("Attendi l'aggancio satellitare!"); return;
 }
 try {
 const urlCompleto = "https://open-meteo.com" + currentLatestLat + "&longitude=" + currentLatestLon + "&current=temperature_2m,relative_humidity_2m,surface_pressure";
-const res = await fetch(urlCompleto);
-const d = await res.json();
+const res = await fetch(urlCompleto); const d = await res.json();
 if (d && d.current) {
 const Tk = d.current.temperature_2m + 273.15; const Ppa = d.current.surface_pressure * 100;
 const Psat = 610.78 * Math.exp((17.27 * d.current.temperature_2m) / (d.current.temperature_2m + 237.3));
 const Pv = Psat * (d.current.relative_humidity_2m / 100);
 calculatedRho = ((Ppa - Pv) / (287.058 * Tk)) + (Pv / (461.495 * Tk));
 document.getElementById("rhoDisplay").textContent = calculatedRho.toFixed(4);
-alert("Meteo Sincronizzato! Densità aria aggiornata.");
-} else {
-throw new Error("Dati vuoti dal server");
-}
+alert("Meteo Sincronizzato con successo!");
+} else { throw new Error("Dati vuoti"); }
 } catch (e) { 
-const inputUser = prompt("Connessione meteo respinta (CORS o AdBlock).\nInserisci la temperatura aria corrente in °C per calcolare la densità:", "20");
-if (inputUser !== null) {
-const parsedTemp = parseFloat(inputUser);
-if (!isNaN(parsedTemp)) {
-calculateManualDensity(parsedTemp);
-} else {
-alert("Valore inserito non valido.");
+const pT = prompt("Meteo respinto.\n1 di 3 - Temperatura (°C):", "20");
+if (pT !== null) {
+const t = parseFloat(pT);
+const pP = prompt("2 di 3 - Pressione Locale (hPa):", "1013.25");
+if (pP !== null) {
+const p = parseFloat(pP);
+const pH = prompt("3 di 3 - Umidità Relativa (%):", "50");
+if (pH !== null) {
+const h = parseFloat(pH);
+if (!isNaN(t) && !isNaN(p) && !isNaN(h)) {
+calculateAccurateManualDensity(t, p, h);
+} else { alert("Valori non validi."); }
+}
 }
 }
 }
